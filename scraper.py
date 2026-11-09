@@ -1,82 +1,211 @@
-import time
 import requests
+from bs4 import BeautifulSoup
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
+import time
+import io
 
-def build_player_profiles():
-    print("🚀 1. Building Official Multi-Format Player Profiles...")
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+}
+
+def fetch_statsguru_allround(class_id, format_name, max_pages=15):
+    """
+    Crawls Statsguru allround career records page-by-page.
+    Each page contains 50 players with both batting and bowling figures.
+    """
+    records = []
+    print(f"\n--- Harvesting {format_name} (class={class_id}) up to {max_pages} pages ---")
     
-    # Official, verified career totals across all 6 formats
-    data = [
-        # James Anderson (England)
-        {"player_name": "James Anderson", "format": "Test matches", "span": "2003-2024", "matches": "188", "wickets": "704", "bowling_average": "26.45", "5w": "32"},
-        {"player_name": "James Anderson", "format": "One-Day Internationals", "span": "2002-2015", "matches": "194", "wickets": "269", "bowling_average": "29.22", "5w": "2"},
-        {"player_name": "James Anderson", "format": "Twenty20 Internationals", "span": "2007-2009", "matches": "19", "wickets": "18", "bowling_average": "30.66", "5w": "0"},
-        {"player_name": "James Anderson", "format": "First-class matches", "span": "2001-2026", "matches": "315", "wickets": "1193", "bowling_average": "24.25", "5w": "56"},
-        {"player_name": "James Anderson", "format": "List A matches", "span": "2002-2019", "matches": "261", "wickets": "358", "bowling_average": "28.57", "5w": "2"},
-        {"player_name": "James Anderson", "format": "Twenty20 matches", "span": "2007-2025", "matches": "59", "wickets": "68", "bowling_average": "23.36", "5w": "0"},
+    for page in range(1, max_pages + 1):
+        url = f"https://stats.espncricinfo.com/ci/engine/stats/index.html?class={class_id};page={page};template=results;type=allround"
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=15)
+            if r.status_code != 200:
+                print(f"[{format_name}] Page {page} returned status {r.status_code}, stopping.")
+                break
+                
+            soup = BeautifulSoup(r.text, 'html.parser')
+            tables = soup.find_all('table', class_='engineTable')
+            if len(tables) < 3:
+                print(f"[{format_name}] No data table on page {page}, finished format.")
+                break
+                
+            # The 3rd table is the actual stats table
+            df_page = pd.read_html(io.StringIO(str(tables[2])))[0]
+            if df_page.empty or 'Player' not in df_page.columns:
+                print(f"[{format_name}] Empty table on page {page}, stopping.")
+                break
+                
+            df_page['format'] = format_name
+            records.append(df_page)
+            print(f"[{format_name}] Page {page} scraped: {len(df_page)} players")
+            time.sleep(0.8)  # Polite delay
+        except Exception as e:
+            print(f"[{format_name}] Error on page {page}: {e}")
+            break
+            
+    if records:
+        return pd.concat(records, ignore_index=True)
+    return pd.DataFrame()
 
-        # Muttiah Muralitharan (Sri Lanka)
-        {"player_name": "Muttiah Muralitharan", "format": "Test matches", "span": "1992-2010", "matches": "133", "wickets": "800", "bowling_average": "22.72", "5w": "67"},
-        {"player_name": "Muttiah Muralitharan", "format": "One-Day Internationals", "span": "1993-2011", "matches": "350", "wickets": "534", "bowling_average": "23.08", "5w": "10"},
-        {"player_name": "Muttiah Muralitharan", "format": "First-class matches", "span": "1989-2011", "matches": "232", "wickets": "1374", "bowling_average": "19.64", "5w": "119"},
-        {"player_name": "Muttiah Muralitharan", "format": "List A matches", "span": "1989-2011", "matches": "453", "wickets": "674", "bowling_average": "22.61", "5w": "12"},
-
-        # Wasim Akram (Pakistan)
-        {"player_name": "Wasim Akram", "format": "Test matches", "span": "1985-2002", "matches": "104", "wickets": "414", "bowling_average": "23.62", "5w": "25"},
-        {"player_name": "Wasim Akram", "format": "One-Day Internationals", "span": "1984-2003", "matches": "356", "wickets": "502", "bowling_average": "23.52", "5w": "6"},
-        {"player_name": "Wasim Akram", "format": "First-class matches", "span": "1984-2003", "matches": "257", "wickets": "1042", "bowling_average": "21.64", "5w": "70"},
-        {"player_name": "Wasim Akram", "format": "List A matches", "span": "1984-2003", "matches": "594", "wickets": "881", "bowling_average": "21.91", "5w": "12"},
-
-        # Shane Warne (Australia)
-        {"player_name": "Shane Warne", "format": "Test matches", "span": "1992-2007", "matches": "145", "wickets": "708", "bowling_average": "25.41", "5w": "37"},
-        {"player_name": "Shane Warne", "format": "One-Day Internationals", "span": "1993-2005", "matches": "194", "wickets": "293", "bowling_average": "25.73", "5w": "1"},
-        {"player_name": "Shane Warne", "format": "First-class matches", "span": "1991-2007", "matches": "301", "wickets": "1319", "bowling_average": "26.11", "5w": "69"},
-
-        # Sachin Tendulkar (India)
-        {"player_name": "Sachin Tendulkar", "format": "Test matches", "span": "1989-2013", "matches": "200", "wickets": "46", "bowling_average": "54.17", "5w": "0"},
-        {"player_name": "Sachin Tendulkar", "format": "One-Day Internationals", "span": "1989-2012", "matches": "463", "wickets": "154", "bowling_average": "44.48", "5w": "2"},
-        {"player_name": "Sachin Tendulkar", "format": "First-class matches", "span": "1988-2013", "matches": "310", "wickets": "71", "bowling_average": "61.74", "5w": "0"},
-        {"player_name": "Sachin Tendulkar", "format": "List A matches", "span": "1989-2013", "matches": "551", "wickets": "201", "bowling_average": "42.15", "5w": "2"}
-    ]
-    df = pd.DataFrame(data)
-    for col in df.columns:
-        df[col] = df[col].astype(str)
-    df.to_parquet("official_player_full_profiles.parquet", index=False)
-    print("✅ Created: official_player_full_profiles.parquet")
-
-def build_global_first_class_history():
-    print("🏏 2. Building Global Domestic First-Class Champions (Ranji, Sheffield, County, Currie Cup)...")
+def fetch_player_profiles():
+    """
+    Crawls full 6-format career breakdown (First-Class, List A, Tests, ODIs, T20s)
+    for iconic domestic and international legends.
+    """
+    LEGENDS = {
+        'Sachin Tendulkar': 35320,
+        'James Anderson': 8608,
+        'Muttiah Muralitharan': 49636,
+        'Shane Warne': 8166,
+        'Wasim Akram': 43555,
+        'Virat Kohli': 253802,
+        'MS Dhoni': 28081,
+        'Rohit Sharma': 34102,
+        'Jacques Kallis': 45789,
+        'Brian Lara': 52337,
+        'Ricky Ponting': 7133,
+        'Donald Bradman': 4188,
+        'Wasim Jaffer': 29987,       # Ranji Trophy all-time record run-scorer
+        'Cheteshwar Pujara': 32540,
+        'Amol Muzumdar': 31411,
+        'Sunil Gavaskar': 28794,
+        'Kapil Dev': 30024,
+        'Kumar Sangakkara': 50710
+    }
     
-    championships = [
-        # Ranji Trophy (India)
-        {"tournament": "Ranji Trophy", "country": "India", "season": "1934/35", "winner": "Bombay", "runner_up": "Northern India", "margin": "208 runs", "venue": "Bombay"},
-        {"tournament": "Ranji Trophy", "country": "India", "season": "1942/43", "winner": "Baroda", "runner_up": "Hyderabad", "margin": "307 runs", "venue": "Baroda"},
-        {"tournament": "Ranji Trophy", "country": "India", "season": "1943/44", "winner": "Western India", "runner_up": "Bengal", "margin": "inn & 23 runs", "venue": "Brabourne Stadium"},
-        {"tournament": "Ranji Trophy", "country": "India", "season": "1970/71", "winner": "Bombay", "runner_up": "Maharashtra", "margin": "48 runs", "venue": "Bombay"},
-        {"tournament": "Ranji Trophy", "country": "India", "season": "1990/91", "winner": "Haryana", "runner_up": "Bombay", "margin": "2 runs", "venue": "Wankhede"},
-        {"tournament": "Ranji Trophy", "country": "India", "season": "2023/24", "winner": "Mumbai", "runner_up": "Vidarbha", "margin": "169 runs", "venue": "Wankhede"},
+    rows = []
+    print("\n--- Harvesting multi-format career profiles for legends ---")
+    
+    for name, pid in LEGENDS.items():
+        url = f"https://stats.espncricinfo.com/ci/engine/player/{pid}.html"
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=15)
+            if r.status_code != 200:
+                continue
+                
+            soup = BeautifulSoup(r.text, 'html.parser')
+            tables = soup.find_all('table', class_='engineTable')
+            
+            # Find Career Summary table (batting & fielding)
+            batting_dict = {}
+            for t in tables:
+                caption = t.find('caption')
+                caption_text = caption.get_text() if caption else ''
+                if 'Career summary' in caption_text and 'batting' in caption_text.lower():
+                    df_bat = pd.read_html(io.StringIO(str(t)))[0]
+                    if 'Unnamed: 0' in df_bat.columns:
+                        df_bat.rename(columns={'Unnamed: 0': 'format_raw'}, inplace=True)
+                    for _, row in df_bat.iterrows():
+                        fmt = str(row.get('format_raw', '')).strip()
+                        if fmt and fmt not in ['nan', 'Career summary']:
+                            batting_dict[fmt] = row.to_dict()
+                            
+            # Find Career Summary table (bowling)
+            bowling_dict = {}
+            for t in tables:
+                caption = t.find('caption')
+                caption_text = caption.get_text() if caption else ''
+                if 'Career summary' in caption_text and 'bowling' in caption_text.lower():
+                    df_bowl = pd.read_html(io.StringIO(str(t)))[0]
+                    if 'Unnamed: 0' in df_bowl.columns:
+                        df_bowl.rename(columns={'Unnamed: 0': 'format_raw'}, inplace=True)
+                    for _, row in df_bowl.iterrows():
+                        fmt = str(row.get('format_raw', '')).strip()
+                        if fmt and fmt not in ['nan', 'Career summary']:
+                            bowling_dict[fmt] = row.to_dict()
+                            
+            # Merge batting & bowling for each format
+            all_fmts = set(list(batting_dict.keys()) + list(bowling_dict.keys()))
+            for fmt in all_fmts:
+                b_stat = batting_dict.get(fmt, {})
+                bw_stat = bowling_dict.get(fmt, {})
+                
+                fmt_norm = fmt.upper().replace(' ', '_').replace('-', '_')
+                if 'FIRST_CLASS' in fmt_norm:
+                    fmt_norm = 'FIRST_CLASS'
+                elif 'LIST_A' in fmt_norm:
+                    fmt_norm = 'LIST_A'
+                elif 'TEST' in fmt_norm:
+                    fmt_norm = 'TEST'
+                elif 'ODI' in fmt_norm:
+                    fmt_norm = 'ODI'
+                elif 'T20I' in fmt_norm:
+                    fmt_norm = 'T20I'
+                elif fmt_norm in ['T20S', 'TWENTY20']:
+                    fmt_norm = 'TWENTY20'
+                    
+                row = {
+                    'Player': f"{name} ({b_stat.get('Span', '')})".strip(),
+                    'Span': b_stat.get('Span', bw_stat.get('Span', '')),
+                    'Mat': b_stat.get('Mat', bw_stat.get('Mat', '')),
+                    'Runs': b_stat.get('Runs', ''),
+                    'HS': b_stat.get('HS', ''),
+                    'Bat Av': b_stat.get('Ave', ''),
+                    '100': b_stat.get('100', ''),
+                    'Wkts': bw_stat.get('Wkts', ''),
+                    'BBI': bw_stat.get('BBI', ''),
+                    'Bowl Av': bw_stat.get('Ave', ''),
+                    '5': bw_stat.get('5w', ''),
+                    'Ct': b_stat.get('Ct', ''),
+                    'St': b_stat.get('St', ''),
+                    'format': fmt_norm
+                }
+                rows.append(row)
+            print(f"Profile harvested: {name} ({len(all_fmts)} formats)")
+            time.sleep(0.6)
+        except Exception as e:
+            print(f"Error on profile {name}: {e}")
+            
+    return pd.DataFrame(rows)
 
-        # Sheffield Shield (Australia)
-        {"tournament": "Sheffield Shield", "country": "Australia", "season": "1892/93", "winner": "Victoria", "runner_up": "New South Wales", "margin": "Table Leader", "venue": "Melbourne"},
-        {"tournament": "Sheffield Shield", "country": "Australia", "season": "1929/30", "winner": "New South Wales", "runner_up": "Victoria", "margin": "Table Leader", "venue": "SCG"},
-        {"tournament": "Sheffield Shield", "country": "Australia", "season": "2023/24", "winner": "Western Australia", "runner_up": "Tasmania", "margin": "377 runs", "venue": "Perth"},
-
-        # County Championship (England)
-        {"tournament": "County Championship", "country": "England", "season": "1890", "winner": "Surrey", "runner_up": "Yorkshire", "margin": "Table Leader", "venue": "The Oval"},
-        {"tournament": "County Championship", "country": "England", "season": "1971", "winner": "Surrey", "runner_up": "Warwickshire", "margin": "Table Leader", "venue": "The Oval"},
-        {"tournament": "County Championship", "country": "England", "season": "2024", "winner": "Surrey", "runner_up": "Somerset", "margin": "Table Leader", "venue": "The Oval"},
-
-        # Currie Cup (South Africa)
-        {"tournament": "Currie Cup", "country": "South Africa", "season": "1889/90", "winner": "Western Province", "runner_up": "Transvaal", "margin": "Table Leader", "venue": "Cape Town"},
-        {"tournament": "Currie Cup", "country": "South Africa", "season": "2023/24", "winner": "Lions", "runner_up": "Western Province", "margin": "99 runs", "venue": "Johannesburg"}
+def main():
+    dfs = []
+    
+    # 1. Statsguru Automated Pagination (Tests, ODIs, T20Is, Twenty20)
+    formats = [
+        (1, 'TEST', 15),       # ~750 Test players
+        (2, 'ODI', 15),        # ~750 ODI players
+        (3, 'T20I', 15),       # ~750 T20I players
+        (6, 'TWENTY20', 10)    # ~500 Twenty20 players (IPL & leagues)
     ]
-    df_c = pd.DataFrame(championships)
-    for col in df_c.columns:
-        df_c[col] = df_c[col].astype(str)
-    df_c.to_parquet("global_first_class_championships.parquet", index=False)
-    print("✅ Created: global_first_class_championships.parquet")
+    
+    for cid, fname, pages in formats:
+        df = fetch_statsguru_allround(cid, fname, max_pages=pages)
+        if not df.empty:
+            dfs.append(df)
+            
+    # 2. Multi-Format Legend Deep Harvest (First-Class, List A, Tests, ODIs, T20s)
+    df_legends = fetch_player_profiles()
+    if not df_legends.empty:
+        dfs.append(df_legends)
+        
+    if not dfs:
+        print("No data collected!")
+        return
+        
+    combined = pd.concat(dfs, ignore_index=True)
+    
+    # Clean unwanted artifacts
+    cols_to_drop = [c for c in combined.columns if 'Unnamed' in str(c) or c == 'Ave Diff']
+    combined.drop(columns=cols_to_drop, errors='ignore', inplace=True)
+    
+    # Ensure all string columns for clean Parquet serialization
+    for col in combined.columns:
+        combined[col] = combined[col].astype(str)
+        
+    # Deduplicate
+    combined.drop_duplicates(subset=['Player', 'format'], inplace=True)
+    
+    out_file = 'official_cricinfo_player_careers.parquet'
+    table = pa.Table.from_pandas(combined)
+    pq.write_table(table, out_file)
+    print(f"\n==========================================")
+    print(f"SUCCESS: Saved {len(combined)} rows to {out_file}")
+    print(f"Format distribution:\n{combined['format'].value_counts()}")
+    print(f"==========================================")
 
-if __name__ == "__main__":
-    build_player_profiles()
-    build_global_first_class_history()
-    print("🎉 Overnight database build completed cleanly!")
+if __name__ == '__main__':
+    main()
