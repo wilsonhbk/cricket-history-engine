@@ -10,24 +10,25 @@ HEADERS = {
 }
 
 def fetch_statsguru_table(url, max_retries=3):
-    """Fetches and parses a Statsguru HTML table cleanly with retry logic."""
+    """Fetches and parses a Statsguru HTML table cleanly."""
     for attempt in range(max_retries):
         try:
             resp = requests.get(url, headers=HEADERS, timeout=15)
             if resp.status_code == 200:
-                # Find the main stats table (class 'engineTable')
                 tables = pd.read_html(StringIO(resp.text))
                 for df in tables:
                     if len(df) > 5 and ("Player" in df.columns or "Team" in df.columns or "Winner" in df.columns):
+                        # Filter out duplicate header rows inside Cricinfo tables
+                        df = df[df["Player"] != "Player"].copy()
                         return df
             time.sleep(1.5)
-        except Exception as e:
+        except Exception:
             time.sleep(2)
     return None
 
 def harvest_international_careers():
-    """Harvests official international player careers across Tests, ODIs, and T20Is."""
-    print("🚀 1. Harvesting Official International Career Records...")
+    """Harvests official international player careers across all formats."""
+    print("🚀 1. Harvesting Official Career Records...")
     formats = {
         "TEST": 1,
         "ODI": 2,
@@ -49,14 +50,15 @@ def harvest_international_careers():
             
     if all_player_records:
         combined_df = pd.concat(all_player_records, ignore_index=True)
+        # Convert all columns to clean string format to prevent PyArrow type conflicts
+        for col in combined_df.columns:
+            combined_df[col] = combined_df[col].astype(str)
         combined_df.to_parquet("official_cricinfo_player_careers.parquet", index=False)
         print("   ✅ Saved: official_cricinfo_player_careers.parquet")
 
 def harvest_ranji_and_domestic():
-    """Generates the verified Ranji Trophy, Sheffield Shield, and County historical tables."""
-    print("🏏 2. Harvesting Domestic First-Class Match Scorecards (Ranji, Sheffield Shield)...")
-    
-    # 1934-2026 Core Ranji Finals & Milestone Archive
+    """Generates the verified Ranji Trophy finals history."""
+    print("🏏 2. Harvesting Ranji Trophy Championship History...")
     ranji_finals = [
         {"season": "1934/35", "winner": "Bombay", "runner_up": "Northern India", "margin": "208 runs", "venue": "Bombay"},
         {"season": "1935/36", "winner": "Bombay", "runner_up": "Madras", "margin": "190 runs", "venue": "Bombay"},
@@ -71,7 +73,10 @@ def harvest_ranji_and_domestic():
         {"season": "2015/16", "winner": "Mumbai", "runner_up": "Saurashtra", "margin": "inn & 21 runs", "venue": "Pune"},
         {"season": "2023/24", "winner": "Mumbai", "runner_up": "Vidarbha", "margin": "169 runs", "venue": "Wankhede, Mumbai"}
     ]
-    pd.DataFrame(ranji_finals).to_parquet("ranji_trophy_finals_history.parquet", index=False)
+    df_ranji = pd.DataFrame(ranji_finals)
+    for col in df_ranji.columns:
+        df_ranji[col] = df_ranji[col].astype(str)
+    df_ranji.to_parquet("ranji_trophy_finals_history.parquet", index=False)
     print("   ✅ Saved: ranji_trophy_finals_history.parquet")
 
 if __name__ == "__main__":
