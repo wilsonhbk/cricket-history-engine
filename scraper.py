@@ -8,71 +8,60 @@ HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 }
 
-def fetch_cricinfo_table(url):
-    """Fetches and parses a Cricinfo table cleanly."""
-    try:
-        resp = requests.get(url, headers=HEADERS, timeout=15)
-        if resp.status_code == 200:
-            tables = pd.read_html(StringIO(resp.text))
-            for df in tables:
-                if len(df) > 5 and ("Player" in df.columns or "Name" in df.columns):
-                    df = df.rename(columns={"Name": "Player", "Wickets": "Wkts", "Matches": "Mat"})
-                    df = df[df["Player"] != "Player"].copy()
-                    return df
-        time.sleep(1)
-    except Exception:
-        pass
-    return None
+# Key player IDs on ESPNcricinfo
+PLAYER_REGISTRY = {
+    "James Anderson": 8608,
+    "Stuart Broad": 9253,
+    "Muttiah Muralitharan": 49636,
+    "Shane Warne": 8180,
+    "Glenn McGrath": 6565,
+    "Wasim Akram": 43555,
+    "Sachin Tendulkar": 35320,
+    "Virat Kohli": 253802,
+    "MS Dhoni": 28081,
+    "Rohit Sharma": 34102,
+    "Jasprit Bumrah": 625383,
+    "Ravichandran Ashwin": 26421
+}
 
-def harvest_all_formats():
-    print("🚀 1. Harvesting International Formats from Statsguru...")
-    all_records = []
-    
-    # 1. International Formats (Statsguru Engine)
-    intl_formats = {"TEST": 1, "ODI": 2, "T20I": 3, "T20": 6}
-    for fmt_name, class_id in intl_formats.items():
-        print(f"   -> Fetching {fmt_name}...")
-        url = f"https://stats.espncricinfo.com/ci/engine/stats/index.html?class={class_id};page=1;template=results;type=allround"
-        df = fetch_cricinfo_table(url)
-        if df is not None:
-            df["format"] = fmt_name
-            all_records.append(df)
-            
-    # 2. First-Class All-Time Bowling Legends (Rhodes, Freeman, Parker)
-    print("🏏 2. Harvesting Official First-Class Wicket Leaders...")
-    fc_bowl_url = "https://www.espncricinfo.com/records/most-wickets-in-career-84043"
-    df_fc_bowl = fetch_cricinfo_table(fc_bowl_url)
-    if df_fc_bowl is not None:
-        df_fc_bowl["format"] = "FIRST_CLASS"
-        all_records.append(df_fc_bowl)
-    else:
-        # Fallback verified top 10 historical First-Class bowling table
-        df_fc_bowl = pd.DataFrame([
-            {"Player": "Wilfred Rhodes (ENG)", "Span": "1898-1930", "Mat": "1110", "Wkts": "4204", "Ave": "16.72", "format": "FIRST_CLASS"},
-            {"Player": "Tich Freeman (ENG)", "Span": "1914-1936", "Mat": "592", "Wkts": "3776", "Ave": "18.42", "format": "FIRST_CLASS"},
-            {"Player": "Charlie Parker (ENG)", "Span": "1903-1935", "Mat": "635", "Wkts": "3278", "Ave": "19.46", "format": "FIRST_CLASS"},
-            {"Player": "Jack Hearne (ENG)", "Span": "1888-1923", "Mat": "639", "Wkts": "3061", "Ave": "17.75", "format": "FIRST_CLASS"},
-            {"Player": "Tom Goddard (ENG)", "Span": "1922-1952", "Mat": "593", "Wkts": "2979", "Ave": "19.84", "format": "FIRST_CLASS"}
-        ])
-        all_records.append(df_fc_bowl)
+def harvest_player_careers():
+    print("🚀 Harvesting Complete Career Profiles (Test, ODI, T20I, First-Class, List A, T20)...")
+    all_player_data = []
 
-    # 3. List A All-Time Bowling Legends (Wasim Akram, Donald, Murali)
-    print("🏏 3. Harvesting Official List A Wicket Leaders...")
-    df_la_bowl = pd.DataFrame([
-        {"Player": "Wasim Akram (PAK)", "Span": "1984-2003", "Mat": "594", "Wkts": "881", "Ave": "21.91", "format": "LIST_A"},
-        {"Player": "Allan Donald (SA)", "Span": "1985-2004", "Mat": "453", "Wkts": "684", "Ave": "21.84", "format": "LIST_A"},
-        {"Player": "Muttiah Muralitharan (SL)", "Span": "1989-2011", "Mat": "453", "Wkts": "674", "Ave": "22.61", "format": "LIST_A"},
-        {"Player": "Waqar Younis (PAK)", "Span": "1989-2003", "Mat": "411", "Wkts": "674", "Ave": "22.36", "format": "LIST_A"},
-        {"Player": "Chaminda Vaas (SL)", "Span": "1994-2012", "Mat": "439", "Wkts": "610", "Ave": "27.35", "format": "LIST_A"}
-    ])
-    all_records.append(df_la_bowl)
+    for player_name, player_id in PLAYER_REGISTRY.items():
+        print(f"   -> Fetching full career profile for {player_name} (ID: {player_id})...")
+        url = f"https://stats.espncricinfo.com/ci/engine/player/{player_id}.html?template=results;type=bowling"
+        
+        try:
+            resp = requests.get(url, headers=HEADERS, timeout=15)
+            if resp.status_code == 200:
+                tables = pd.read_html(StringIO(resp.text))
+                for df in tables:
+                    # Look for the career summary table with format rows
+                    if len(df) >= 3 and any("Test" in str(x) for x in df.iloc[:, 0].values):
+                        # Clean and format table
+                        df.columns = [str(c).strip() for c in df.columns]
+                        df = df.rename(columns={df.columns[0]: "format", "Mat": "matches", "Wkts": "wickets", "Runs": "runs_conceded", "Ave": "bowling_average"})
+                        df["player_name"] = player_name
+                        df["cricinfo_id"] = str(player_id)
+                        
+                        # Filter to standard format rows
+                        valid_formats = ["Test matches", "One-Day Internationals", "Twenty20 Internationals", "First-class matches", "List A matches", "Twenty20 matches"]
+                        df_filtered = df[df["format"].isin(valid_formats)].copy()
+                        
+                        if not df_filtered.empty:
+                            all_player_data.append(df_filtered)
+                            break
+            time.sleep(1)
+        except Exception as e:
+            print(f"      Error fetching {player_name}: {e}")
 
-    if all_records:
-        combined_df = pd.concat(all_records, ignore_index=True)
+    if all_player_data:
+        combined_df = pd.concat(all_player_data, ignore_index=True)
         for col in combined_df.columns:
             combined_df[col] = combined_df[col].astype(str)
-        combined_df.to_parquet("official_cricinfo_player_careers.parquet", index=False)
-        print("✅ Saved: official_cricinfo_player_careers.parquet (TEST, ODI, T20I, FIRST_CLASS, LIST_A, T20)")
+        combined_df.to_parquet("official_player_full_profiles.parquet", index=False)
+        print("✅ Saved: official_player_full_profiles.parquet with ALL formats!")
 
 if __name__ == "__main__":
-    harvest_all_formats()
+    harvest_player_careers()
