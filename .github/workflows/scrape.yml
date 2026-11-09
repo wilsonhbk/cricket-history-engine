@@ -1,15 +1,15 @@
 name: Cricket Data Crawler
 
 on:
-  workflow_dispatch: # Allows you to run it anytime with a click of a button
+  workflow_dispatch:
   schedule:
-    - cron: '0 18 * * *' # Auto-runs every day at 6:30 PM IST (after daily matches finish)
+    - cron: '0 18 * * *' # Daily at 6:30 PM IST
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # Allows saving the database files to your repo
+      contents: write
 
     steps:
       - name: Checkout Repository
@@ -22,9 +22,9 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          pip install requests pandas pyarrow fastparquet
+          pip install requests pandas pyarrow fastparquet lxml html5lib beautifulsoup4
 
-      - name: Run Crawler
+      - name: Run Statsguru Harvester
         run: |
           python scraper.py
 
@@ -33,4 +33,4 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add *.parquet
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update cricket database files" && git push)
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Official Cricinfo harvest complete" && git push)
