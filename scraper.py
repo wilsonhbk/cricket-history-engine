@@ -32,14 +32,12 @@ def harvest_wikipedia_career_profiles():
         try:
             r = session.get(url, headers=HEADERS, timeout=15)
             if r.status_code != 200:
-                print(f"Failed to fetch {player} (HTTP {r.status_code})")
                 continue
                 
             dfs = pd.read_html(io.StringIO(r.text))
             stat_df = None
             for d in dfs:
                 cols = [str(c).lower() for c in d.columns]
-                # Look for the career statistics table in the infobox
                 if any('test' in c or 'odi' in c or 't20' in c or 'first-class' in c for c in cols):
                     first_col = d.columns[0]
                     vals = [str(v).lower() for v in d[first_col].values[:10]]
@@ -48,7 +46,6 @@ def harvest_wikipedia_career_profiles():
                         break
                         
             if stat_df is not None:
-                # Transpose so formats are rows
                 first_col = stat_df.columns[0]
                 stat_df.set_index(first_col, inplace=True)
                 stat_df = stat_df.T.reset_index()
@@ -66,33 +63,39 @@ def harvest_wikipedia_career_profiles():
                 stat_df = stat_df[stat_df['format'].notnull()]
                 stat_df['player'] = player
                 
-                # Normalize column names
-                for col in stat_df.columns:
-                    col_lower = str(col).lower()
-                    if 'matches' in col_lower:
-                        stat_df.rename(columns={col: 'matches'}, inplace=True)
-                    elif 'runs' in col_lower and 'conceded' not in col_lower:
-                        stat_df.rename(columns={col: 'runs'}, inplace=True)
-                    elif 'average' in col_lower and 'bowl' not in col_lower:
-                        stat_df.rename(columns={col: 'batting_average'}, inplace=True)
-                    elif '100' in col_lower or 'centuries' in col_lower:
-                        stat_df.rename(columns={col: 'centuries'}, inplace=True)
-                    elif 'wickets' in col_lower:
-                        stat_df.rename(columns={col: 'wickets'}, inplace=True)
+                # Remove duplicate columns from Wikipedia table
+                stat_df = stat_df.loc[:, ~stat_df.columns.duplicated()].copy()
+                
+                col_rename = {}
+                for c in stat_df.columns:
+                    c_low = str(c).lower()
+                    if 'matches' in c_low and 'matches' not in col_rename.values():
+                        col_rename[c] = 'matches'
+                    elif 'runs' in c_low and 'conceded' not in c_low and 'runs' not in col_rename.values():
+                        col_rename[c] = 'runs'
+                    elif 'average' in c_low and 'bowl' not in c_low and 'batting_average' not in col_rename.values():
+                        col_rename[c] = 'batting_average'
+                    elif ('100' in c_low or 'centuries' in c_low) and 'centuries' not in col_rename.values():
+                        col_rename[c] = 'centuries'
+                    elif 'wickets' in c_low and 'wickets' not in col_rename.values():
+                        col_rename[c] = 'wickets'
                         
+                stat_df.rename(columns=col_rename, inplace=True)
+                
                 for required in ['player', 'format', 'matches', 'runs', 'batting_average', 'centuries', 'wickets']:
                     if required not in stat_df.columns:
                         stat_df[required] = ''
                         
-                all_rows.append(stat_df[['player', 'format', 'matches', 'runs', 'batting_average', 'centuries', 'wickets']])
-                print(f"Harvested {player}: {len(stat_df)} formats")
+                clean_slice = stat_df[['player', 'format', 'matches', 'runs', 'batting_average', 'centuries', 'wickets']].copy()
+                clean_slice = clean_slice.loc[:, ~clean_slice.columns.duplicated()]
+                all_rows.extend(clean_slice.to_dict('records'))
+                print(f"Harvested {player}: {len(clean_slice)} formats")
             time.sleep(0.3)
         except Exception as e:
             print(f"Error on {player}: {e}")
             
     if all_rows:
-        df_out = pd.concat(all_rows, ignore_index=True)
-        # Clean numeric values
+        df_out = pd.DataFrame(all_rows)
         for c in ['matches', 'runs', 'centuries', 'wickets']:
             if c in df_out.columns:
                 df_out[c] = df_out[c].astype(str).str.replace(',', '').str.replace('*', '').str.strip()
@@ -101,7 +104,7 @@ def harvest_wikipedia_career_profiles():
         out_file = 'official_career_profiles.parquet'
         table = pa.Table.from_pandas(df_out)
         pq.write_table(table, out_file)
-        print(f"SUCCESS: Saved {len(df_out)} career profile rows to {out_file}!")
+        print(f"\nSUCCESS: Saved {len(df_out)} career profile rows to {out_file}!")
 
 def main():
     harvest_wikipedia_career_profiles()
