@@ -3,16 +3,17 @@ name: Cricket Data Crawler
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 18 * * *' # Daily at 6:30 PM IST
+    - cron: '0 18 * * *'
+
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -20,17 +21,19 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Dependencies
+      - name: Install dependencies
         run: |
-          pip install requests pandas pyarrow fastparquet lxml html5lib beautifulsoup4
+          python -m pip install --upgrade pip
+          pip install requests pandas pyarrow beautifulsoup4 lxml html5lib
 
-      - name: Run Statsguru Harvester
+      - name: Run crawler
         run: |
           python scraper.py
 
-      - name: Commit and Save Database Files
+      - name: Commit and push changes
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add *.parquet
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Official Cricinfo harvest complete" && git push)
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add -A
+          git commit -m "Auto-update cricket database files" || exit 0
+          git push
